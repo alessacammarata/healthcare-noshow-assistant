@@ -1,0 +1,216 @@
+---
+title: "Healthcare Industry Statistical Assistant: Optimizing Patient Appointment Attendance"
+subtitle: "Final Project - Level 1 Implementation"
+author: "Alessandra Cammarata"
+date: "July 2026"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Introduction
+
+## Industry Context
+
+The healthcare delivery system relies on predictable appointment schedules to allocate clinical staff, medical equipment, and facility capacity efficiently.
+
+## Intended User
+
+This assistant is designed for the **Patient Care Coordinator / Clinic Operations Manager**.
+
+## Main Problem
+
+High rates of patient missed appointments (no-shows) lead to unrecoverable operational losses, idle physician time, and delayed care for other patients seeking timely access.
+
+## Why the Problem Matters
+
+When patients miss scheduled visits without notice: 1. Clinic operational capacity is wasted. 2. Waiting lists for urgent patient consultations grow longer. 3. Patients with unmonitored chronic conditions suffer worse long-term health outcomes.
+
+## Decision Supported
+
+This assistant enables clinic managers to identify high-risk appointments ahead of time, allowing them to initiate targeted interventions (e.g., automated reminders, transportation assistance, flexible rescheduling, or strategic overbooking).
+
+------------------------------------------------------------------------
+
+# Dataset Overview
+
+## Data Source & Unit of Observation
+
+We utilize the public **Medical Appointment No Shows** dataset from Kaggle. Each row represents a single scheduled medical visit at a public health clinic in Victoria, Brazil.
+
+## Summary Dimensions
+
+- **Number of Observations:** 110,527 records
+- **Number of Variables:** 14 columns
+
+```{r}
+source("R/01_clean_data.R") 
+df_clean <- clean_noshow_data("data/raw_noshows.csv") 
+glimpse(df_clean)
+```
+
+## Data Quality & Preparation
+
+In R, we cleaned the dataset by:
+
+1.  Standardizing variable names to snake_case.
+
+2.  Filtering out negative age values (`age >= 0`).
+
+3.  Calculating `lead_time_days` as `appointment_date - scheduled_date`.
+
+4.  Filtering out invalid records where lead time was negative (`lead_time_days >= 0`).
+
+# Skill 1: Explore Data (Lead Time Distribution)
+
+## Question
+
+What is the distribution of booking lead times across scheduled appointments?
+
+```{r}
+source("R/02_explore.R")
+explore_res <- explore_lead_time(df_clean)
+knitr::kable(explore_res$stats, caption = "Summary Statistics for Lead Time (Days)")
+explore_res$plot
+```
+
+## Validation & Interpretation
+
+- **Validation:** Confirmed `lead_time_days` is numeric and non-negative.
+
+- **Interpretation:** The median lead time is `r explore_res$stats$median_lead` days (IQR = `r explore_res$stats$iqr_lead` days). The heavy right skew shows that while most visits are booked within a week, a small subset of appointments face wait times exceeding 30 days.
+
+- **Limitation:** Lead time measures calendar duration between scheduling and the visit, not clinical urgency.
+
+# Skill 2: Compare Two Groups (SMS Reminders vs. Attendance)
+
+## Question
+
+Do patients receiving SMS text reminders exhibit significantly different no-show rates compared to those who do not?
+
+```{r}
+source("R/03_compare.R")
+compare_res <- compare_sms_impact(df_clean)
+knitr::kable(compare_res$summary, caption = "No-Show Rates by SMS Reminder Status")
+```
+
+## Results & Interpretation
+
+- **Proportion Difference:** `r round(compare_res$rate_diff * 100, 2)` percentage points.
+
+- **95% Confidence Interval:** \[`r round(compare_res$conf_int[1] * 100, 2)`%, `r round(compare_res$conf_int[2] * 100, 2)`%\]
+
+- **P-Value:** `r compare_res$p_value`
+
+- **Interpretation:** Counterintuitively, patients receiving SMS text reminders had a higher raw no-show rate (`r round(compare_res$summary$no_show_rate[2] * 100, 2)`%) than non-recipients (`r round(compare_res$summary$no_show_rate[1] * 100, 2)`%).
+
+- **Limitation:** SMS reminders were systematically sent to appointments booked far in advance (high lead time), confounding the univariate relationship.
+
+# Skill 3: Use a Statistical Model (Logistic Regression)
+
+## Question
+
+Which factors (age, lead time, SMS, welfare scholarship, hypertension) predict the likelihood of an appointment no-show?
+
+```{r}
+source("R/04_model.R")
+model_res <- build_noshow_model(df_clean)
+knitr::kable(model_res$table, caption = "Logistic Regression Model Results")
+```
+
+## Interpretation
+
+- **Lead Time:** Each additional day of wait time increases the odds of a no-show ($OR = `r model_res$table$OddsRatio[model_res$table$Predictor == 'lead_time_days']`$).
+
+- **Age:** Older age is protective against no-shows ($OR = `r model_res$table$OddsRatio[model_res$table$Predictor == 'age']`$).
+
+- **Limitation:** Logistic regression captures linear associations on the logit scale; unmeasured confounders (e.g., weather, transportation) remain unobserved.
+
+# Skill 4: Additional Skill 1 — Trend Analysis
+
+## Question
+
+How do no-show rates fluctuate across operating days of the week?
+
+```{r}
+source("R/05_trend_analysis.R")
+trend_res <- analyze_day_of_week_trend(df_clean)
+knitr::kable(trend_res$summary, caption = "No-Show Rate Summary by Weekday")
+trend_res$plot
+```
+
+## Interpretation
+
+No-show rates peak early in the week (Monday/Tuesday) and decline toward Friday. This insight allows clinic managers to adjust overbooking ratios dynamically based on the day of the week.
+
+# Skill 5: Additional Skill 2 — Patient Priority Ranking
+
+## Question
+
+Which upcoming appointments are at highest risk of no-show and need immediate care coordinator outreach?
+
+```{r}
+source("R/06_patient_ranking.R")
+ranked_queue <- rank_high_risk_patients(df_clean, model_res$model, top_n = 10)
+knitr::kable(ranked_queue, caption = "Top 10 High-Risk Appointments Queue")
+```
+
+## Decision Supported
+
+This priority queue directs the Patient Care Coordinator's manual call schedule for tomorrow, focusing outreach on appointments with predicted risk exceeding 40%.
+
+# Skill 6: Additional Skill 3 — Data Quality Audit
+
+## Question
+
+Are missing values or invalid data entries affecting the scheduling dataset?
+
+```{r}
+source("R/07_data_quality_audit.R")
+audit_res <- audit_data_quality("data/raw_noshows.csv")
+knitr::kable(audit_res, caption = "Data Quality Audit Summary")
+```
+
+## Interpretation
+
+The audit confirmed 0 missing values in the raw dataset, but flagged 1 negative age and several date sequencing errors, validating our preprocessing filters.
+
+# Demonstration of Validation Rules
+
+To ensure system reliability, four distinct validation rules were implemented:
+
+1.  **Rule 1 (Data Type Validation):** Attempting numeric operations on non-numeric columns raises an explicit stop error.
+
+2.  **Rule 2 (Group Count Validation):** Attempting a 2-group proportion test on variables with $>2$ categories halts execution.
+
+3.  **Rule 3 (Missing Predictor Check):** Ranking functions check for required feature columns prior to running prediction algorithms.
+
+4.  **Rule 4 (Range Check):** Filtering logic rejects negative age and negative lead time records.
+
+# How Google Antigravity Was Used
+
+Google Antigravity assisted throughout project development:
+
+1.  **Repository & Skill Setup:** Antigravity scaffolded the directory layout and generated draft `SKILL.md` specifications.
+
+2.  **Code Modularization:** Antigravity converted standalone analysis scripts into reusable R functions with error handling.
+
+3.  **Review & Refinement:** During code review, Antigravity initially suggested removing `lead_time_days <= 0` records. I corrected this logic to retain `lead_time_days == 0` (same-day appointments) while removing only strictly negative values (`< 0`).
+
+# Limitations
+
+1.  **Dataset Limitation:** The dataset originates from public clinics in a single region (Brazil, 2016) and may not generalize to private practices or other countries.
+
+2.  **Statistical Limitation:** Association does not prove causation. High predicted probability identifies risk, not cause.
+
+3.  **Implementation Limitation:** As a Level 1 static report, updates require re-rendering the document rather than querying a live real-time API.
+
+# Reflection
+
+Building this Statistical Assistant demonstrated the importance of linking statistical methods directly to an industry decision. The most challenging aspect was resolving the SMS reminder paradox through multivariate modeling. Given more time, I would incorporate real-time clinic scheduling constraints and weather data into the predictive model.
